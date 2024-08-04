@@ -1,8 +1,10 @@
+#include <cmath>
 #include <Wire.h>
 #include <DHT.h>
 #include <DHT_U.h>
 #include <AS5600.h>
 #include <ArduinoJson.h>
+
 // ----------- voltage variables ----------
 #define voltagePin A0
 
@@ -11,15 +13,23 @@ float voltage = 0;
 const float R1 = 10000.0;    // Resistance value of R1 in ohms
 const float R2 = 45000.0;    // Resistance value of R2 in ohms
 // ----------------------------------------
+
 // ------ wind dir sensing variables ------
 float windDirAngle = 0;
 unsigned long lastReadDirAngle = 0;
+
+const unsigned short windDirBuffSize = 26;
+String windDirBuff[windDirBuffSize];
+unsigned short windDirBuffCount = 0;
 // ----------------------------------------
+
 // ------ windspeed sensing variables -----
 #define hallSensorPin 13
 volatile unsigned short rotations = 0;
 volatile unsigned long rotationsContactBounceTime = 0;
+unsigned long rotationTime = 0;
 // ----------------------------------------
+
 // ----------- Temp Sensing ---------------
 #define DHTPIN 12 //D6
 #define DHTTYPE DHT22   // DHT 11/22
@@ -29,14 +39,17 @@ float dhtHum = 0;
 
 unsigned long lastReadTempHumidity = 0;
 // ----------------------------------------
+
 // --------------- general ----------------
 #define SensorPower D6
 
 AMS_5600 ams5600;
 StaticJsonDocument<5000> dataToServer;
+StaticJsonDocument<500> dataFromServer;
 
 unsigned long lastSendData = 0;
 const unsigned long sendDataInterval = 28000;
+uint32_t serverErrorCount = 0;
 
 void IRAM_ATTR isr_rotation();
 void enterSleep(short sleepMin, bool inSetup = false);
@@ -51,48 +64,150 @@ void setup()
 
   enterSleep(0, true);
 
+  digitalWrite(SensorPower, HIGH);
+
+  readfromRTCMem(serverErrorCount, 1);
+
+  if(serverErrorCount > 100) { // when memory is reset value goes really high and needs to be written to
+    serverErrorCount = 0;
+    saveInRTCMem(serverErrorCount, 1);
+  }
+
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), isr_rotation, FALLING);
 }
 
 void loop()
 {
     // Serial.println(String(convertRawAngleToDegrees(ams5600.getRawAngle()),DEC));
-    readTempAndHumid();
-    readWindDir();
-    Serial.println(windDirAngle);
-    Serial.println(rotations);
-    Serial.println(dhtTemp);
-    Serial.println(dhtHum);
-    delay(500);
+    
+    // Serial.println(windDirAngle);
+    // Serial.println(rotations);
+    // Serial.println(dhtTemp);
+    // Serial.println(dhtHum);
+    delay(1000);
 
-    if((millis() - lastSendData) >= sendDataInterval) {
+    unsigned long passedTimeSinceSend = millis() - lastSendData;
+    if(passedTimeSinceSend >= sendDataInterval) {
+      rotationTime = passedTimeSinceSend;
+      readVoltage();
+      readTempAndHumid();
       fillDataForServer();
-      serializeJson(dataToServer, Serial);
-      Serial.println();
+      // serializeJson(dataToServer, Serial);
+      // Serial.println();
+      sendHttp();
       lastSendData = millis();
     }
+
+    readWindDir();
+    if(windDirBuffCount >= windDirBuffSize) {
+      windDirBuffCount = 0;
+    }
+
+    windDirBuff[windDirBuffCount] = String(windDirAngle, 2);
+
+    windDirBuffCount++;
+}
+
+void sendHttp(){
+  Serial.println(F("AT"));
+  delay(500);
+  Serial.println(F("AT+SAPBR=3,1,\"Contype\",\"GPRS\"\r"));
+  delay(500);
+  Serial.println(F("AT+SAPBR=3,1,\"APN\",\"internet.vivacom.bg\"\r"));
+  delay(500);
+  Serial.println(F("AT+SAPBR=1,1\r"));
+  delay(500);
+  Serial.println(F("AT+HTTPINIT\r"));
+  delay(500);
+  Serial.println(F("AT+HTTPPARA=\"URL\",\"http://46.55.200.199/Send\"\r"));
+  delay(500);
+  Serial.println(F("AT+HTTPPARA=\"CONTENT\",\"application/json\"\r"));
+  delay(500);
+  Serial.print(F("AT+HTTPDATA="));
+  Serial.print(measureJson(dataToServer));
+  Serial.println(",1500\r");
+  delay(500);
+  serializeJson(dataToServer, Serial); // Feed Data into AT+HTTPDATA
+  Serial.println();
+  delay(750);
+  //serialFlush();
+  delay(500);
+  Serial.println(F("AT+HTTPACTION=1\r"));
+  delay(2000);
+  Serial.println(F("AT+HTTPREAD=0,300\r"));
+  serialFlush();
+  delay(500);
+  String httpData = Serial.readString();
+  //Serial.println(httpData);
+  httpData = httpData.substring(httpData.indexOf('{'), httpData.lastIndexOf('}') + 1);
+  //Serial.println(httpData);
+  dataFromServer.clear();
+  DeserializationError error = deserializeJson(dataFromServer, httpData);
+  if(error) {
+    serverErrorCount++;
+    //Serial.println(serverErrorCount);
+    //Serial.println("Error");
+    if(serverErrorCount == 10 ) { // 10 tries to connect to server
+      saveInRTCMem(serverErrorCount, 1);
+      enterSleep(10); // 10 min
+    }else if(serverErrorCount >= 20) { //20 tries to connect to server
+      saveInRTCMem(serverErrorCount, 1);
+      enterSleep(20); // 20 min
+    }
+    else if(serverErrorCount >= 100) { //100 tries to connect to server
+      saveInRTCMem(serverErrorCount, 1);
+      enterSleep(360); // 360 = 6 HOUR
+    }
+  }else {
+    serverErrorCount = 0;
+    saveInRTCMem(serverErrorCount, 1);
+    String mode = dataFromServer["mode"];
+    short type = (short)dataFromServer["type"];
+    //Serial.println(mode);
+    if(mode == F("ps")){
+      if(type == 0){
+        enterSleep((short)dataFromServer["value"]);
+      }
+      
+      short delay;
+      switch(type){
+        case 1: delay = 10;break; // 10min
+        case 2: delay = 30;break; // 30min
+        case 3: delay = 60;break; // 1hour
+        case 4: delay = 120;break; // 2hour
+        case 5: delay = 180;break; // 3hour
+        case 6: delay = 360;break; // 6hour
+        case 7: delay = 480;break; // 8hour
+        case 8: delay = 600;break; // 10hour
+      }
+      enterSleep(delay);
+    }
+  }
+  //Serial.println(F("AT+CSCLK=2\r"));
 }
 
 void fillDataForServer() {
   dataToServer.clear();
-  // copyArray(windDirBuff, dataToServer["dd"]);
-  // copyArray(windSpeedBuff, dataToServer["wsd"]);
-  //dataToServer["rt"] = rotationTime; 
-  //rotationTime = 0;
+  copyArray(windDirBuff, dataToServer["dd"]);
+  dataToServer["rt"] = rotationTime; 
   dataToServer["r"] = rotations; 
-  //rotations = 0;
-  //dataToServer["p"] = latestPressure; 
+  rotations = 0;
   dataToServer["h"] = String(dhtHum, 2); 
   dataToServer["t1"] = String(dhtTemp, 2); 
-  //dataToServer["t2"] = String(latestTemp2, 2); 
-  //dataToServer["v"] = String(voltage, 2);
+  dataToServer["v"] = String(voltage, 2);
   dataToServer["Id"] = "43123546";
+}
+
+void readVoltage(){
+    float voltageOut = analogRead(voltagePin) * (3.3 / 1023.0);
+    voltage = voltageOut * ((R1 + R2) / R1);
 }
 
 void readWindDir(){
     if((lastReadDirAngle - millis()) >= 1500){
-      float angle = convertRawAngleToDegrees(ams5600.getRawAngle());
-      windDirAngle = angle;
+      float angle = convertRawAngleToDegrees(ams5600.getRawAngle());\
+      float offset = 0;
+      windDirAngle = fmod(angle + offset, 360.0);
     }
 
     lastReadDirAngle = millis();
@@ -183,4 +298,10 @@ void enterSleep(short sleepMin, bool inSetup) { // isSetup = false
 
   digitalWrite(SensorPower, LOW);
   ESP.deepSleep((sleepMin * 6) *1e7);
+}
+
+void serialFlush(){
+  while(Serial.available() > 0) {
+    char t = Serial.read();
+  }
 }
