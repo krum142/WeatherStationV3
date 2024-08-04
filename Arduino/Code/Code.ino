@@ -51,19 +51,24 @@ unsigned long lastSendData = 0;
 const unsigned long sendDataInterval = 28000;
 uint32_t serverErrorCount = 0;
 
+bool offsetMode = false;
+bool ledTrigger = false;
+
 void IRAM_ATTR isr_rotation();
 void enterSleep(short sleepMin, bool inSetup = false);
 // ----------------------------------
-
+#define Button 14
 void setup()
 {
   Serial.begin(115200);
   Wire.begin();
   dht.begin();
   pinMode(SensorPower, OUTPUT);
-
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode (Button, INPUT) ;
   enterSleep(0, true);
 
+  digitalWrite(LED_BUILTIN, HIGH);
   digitalWrite(SensorPower, HIGH);
 
   readfromRTCMem(serverErrorCount, 1);
@@ -84,28 +89,50 @@ void loop()
     // Serial.println(rotations);
     // Serial.println(dhtTemp);
     // Serial.println(dhtHum);
-    delay(1000);
-
+    // delay(1000);
+    
     unsigned long passedTimeSinceSend = millis() - lastSendData;
     if(passedTimeSinceSend >= sendDataInterval) {
       rotationTime = passedTimeSinceSend;
       readVoltage();
       readTempAndHumid();
       fillDataForServer();
-      // serializeJson(dataToServer, Serial);
-      // Serial.println();
       sendHttp();
       lastSendData = millis();
     }
-
+    buttonLogic();
+    
     readWindDir();
     if(windDirBuffCount >= windDirBuffSize) {
       windDirBuffCount = 0;
     }
-
     windDirBuff[windDirBuffCount] = String(windDirAngle, 2);
-
     windDirBuffCount++;
+}
+void buttonLogic(){
+  unsigned long start = millis();
+  unsigned long pressTime = 0;
+  while(digitalRead(Button) == 1){
+    pressTime = millis() - start;
+    if(pressTime > 5000 ){ 
+      offsetMode = !offsetMode;
+      break;
+    }
+    yield();
+  }
+  ledBlink();
+  Serial.println(offsetMode);
+  Serial.println(pressTime);
+}
+
+void ledBlink(){
+  if(offsetMode){
+    digitalWrite(LED_BUILTIN, ledTrigger);
+    delay(1000);
+    ledTrigger = !ledTrigger;
+  }else{
+    delay(1000);
+  }
 }
 
 void sendHttp(){
