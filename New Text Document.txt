@@ -1,0 +1,6 @@
+Solar Panel 20v > Regulator - 4.2v > 2 Lion Batt > Lolin vin 5v
+
+Use Solar Panel As Shelter for electronics
+Temp Sensor Under Solar Panel
+
+Beeper to set North + button

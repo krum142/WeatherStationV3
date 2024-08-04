@@ -1,0 +1,13 @@
+PowerModes 
+1 - Sends Data Every 30 sec - Never Stops GSM Module
+2 - Power Saving Mode, DeepSleep for 1,2,3,4,5 hours (for night)
+
+No Connection to server
+if above 5 tries shutdown for 15min
+if above 10 tries shut down for 30 min
+if low on power and above 15 tries for 1 hour
+
+To Do.
+Mesure Voltage
+Reset pin to pin 0 bridge/switch for deepsleep
+Break Leds to save on power
