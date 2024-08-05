@@ -120,8 +120,6 @@ void loop()
     
 }
 
-
-
 void handleButtonPress(){
   unsigned long start = millis();
   unsigned long pressTime = 0;
@@ -179,6 +177,11 @@ void sendHttp(){
   //Serial.println(httpData);
   httpData = httpData.substring(httpData.indexOf('{'), httpData.lastIndexOf('}') + 1);
   //Serial.println(httpData);
+  handleServerResponse(httpData);
+  //Serial.println(F("AT+CSCLK=2\r"));
+}
+
+void handleServerResponse(String httpData) {
   dataFromServer.clear();
   DeserializationError error = deserializeJson(dataFromServer, httpData);
   if(error) {
@@ -221,7 +224,6 @@ void sendHttp(){
       enterSleep(delay);
     }
   }
-  //Serial.println(F("AT+CSCLK=2\r"));
 }
 
 void fillDataForServer() {
