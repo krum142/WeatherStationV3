@@ -17,6 +17,7 @@ const float R2 = 45000.0;    // Resistance value of R2 in ohms
 // ------ wind dir sensing variables ------
 float windDirAngle = 0;
 unsigned long lastReadDirAngle = 0;
+float dirOffset = 0;
 
 const unsigned short windDirBuffSize = 26;
 String windDirBuff[windDirBuffSize];
@@ -42,6 +43,7 @@ unsigned long lastReadTempHumidity = 0;
 
 // --------------- general ----------------
 #define SensorPower D6
+#define Button 14
 
 AMS_5600 ams5600;
 StaticJsonDocument<5000> dataToServer;
@@ -57,15 +59,16 @@ bool ledTrigger = false;
 void IRAM_ATTR isr_rotation();
 void enterSleep(short sleepMin, bool inSetup = false);
 // ----------------------------------
-#define Button 14
 void setup()
 {
   Serial.begin(115200);
   Wire.begin();
   dht.begin();
+
   pinMode(SensorPower, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode (Button, INPUT) ;
+  pinMode (Button, INPUT);
+
   enterSleep(0, true);
 
   digitalWrite(LED_BUILTIN, HIGH);
@@ -73,12 +76,11 @@ void setup()
 
   readfromRTCMem(serverErrorCount, 1);
 
-  if(serverErrorCount > 100) { // when memory is reset value goes really high and needs to be written to
-    serverErrorCount = 0;
-    saveInRTCMem(serverErrorCount, 1);
-  }
-
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), isr_rotation, FALLING);
+  delay(5000);
+
+  // Serial.println(ESP.getResetReason());
+  // Serial.println(serverErrorCount);
 }
 
 void loop()
@@ -89,50 +91,59 @@ void loop()
     // Serial.println(rotations);
     // Serial.println(dhtTemp);
     // Serial.println(dhtHum);
-    // delay(1000);
-    
-    unsigned long passedTimeSinceSend = millis() - lastSendData;
-    if(passedTimeSinceSend >= sendDataInterval) {
-      rotationTime = passedTimeSinceSend;
-      readVoltage();
-      readTempAndHumid();
-      fillDataForServer();
-      sendHttp();
-      lastSendData = millis();
+    delay(1000);
+    if(offsetMode) {
+      readWindDir();
+      Serial.println(windDirAngle);
+
+      ledBlink();
+    }else{
+      unsigned long passedTimeSinceSend = millis() - lastSendData;
+      if(passedTimeSinceSend >= sendDataInterval) {
+        rotationTime = passedTimeSinceSend;
+        readVoltage();
+        readTempAndHumid();
+        fillDataForServer();
+        sendHttp();
+        lastSendData = millis();
+      }
+
+      readWindDir();
+      if(windDirBuffCount >= windDirBuffSize) {
+        windDirBuffCount = 0;
+      }
+      windDirBuff[windDirBuffCount] = String(windDirAngle, 2);
+      windDirBuffCount++;
     }
-    buttonLogic();
     
-    readWindDir();
-    if(windDirBuffCount >= windDirBuffSize) {
-      windDirBuffCount = 0;
-    }
-    windDirBuff[windDirBuffCount] = String(windDirAngle, 2);
-    windDirBuffCount++;
+    handleButtonPress();
+    
 }
-void buttonLogic(){
+
+
+
+void handleButtonPress(){
   unsigned long start = millis();
   unsigned long pressTime = 0;
   while(digitalRead(Button) == 1){
     pressTime = millis() - start;
-    if(pressTime > 5000 ){ 
-      offsetMode = !offsetMode;
+    if(pressTime >= 5000 && offsetMode == false){ 
+      offsetMode = true;
+      break;
+    }else if (pressTime > 500 && offsetMode == true){
+      offsetMode = false;
+      digitalWrite(LED_BUILTIN, HIGH);
       break;
     }
     yield();
   }
-  ledBlink();
   Serial.println(offsetMode);
   Serial.println(pressTime);
 }
 
 void ledBlink(){
-  if(offsetMode){
-    digitalWrite(LED_BUILTIN, ledTrigger);
-    delay(1000);
-    ledTrigger = !ledTrigger;
-  }else{
-    delay(1000);
-  }
+  digitalWrite(LED_BUILTIN, ledTrigger);
+  ledTrigger = !ledTrigger;
 }
 
 void sendHttp(){
@@ -233,8 +244,7 @@ void readVoltage(){
 void readWindDir(){
     if((lastReadDirAngle - millis()) >= 1500){
       float angle = convertRawAngleToDegrees(ams5600.getRawAngle());\
-      float offset = 0;
-      windDirAngle = fmod(angle + offset, 360.0);
+      windDirAngle = fmod(angle + dirOffset, 360.0);
     }
 
     lastReadDirAngle = millis();
@@ -313,6 +323,8 @@ void enterSleep(short sleepMin, bool inSetup) { // isSetup = false
     }else{
       saveInRTCMem(hoursSlept, 3);
       saveInRTCMem(hoursToSleep, 5);
+      serverErrorCount = 0;
+      saveInRTCMem(serverErrorCount, 1);
       return;
     }
   }
