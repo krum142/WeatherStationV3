@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include <DHT.h>
 #include <DHT_U.h>
+#include <EEPROM.h>
 #include <AS5600.h>
 #include <ArduinoJson.h>
 
@@ -16,8 +17,11 @@ const float R2 = 45000.0;    // Resistance value of R2 in ohms
 
 // ------ wind dir sensing variables ------
 float windDirAngle = 0;
+float windDirAngleRaw = 0;
 unsigned long lastReadDirAngle = 0;
 float dirOffset = 0;
+
+int dirOffsetMemAddress = 0;
 
 const unsigned short windDirBuffSize = 26;
 String windDirBuff[windDirBuffSize];
@@ -64,6 +68,7 @@ void setup()
   Serial.begin(115200);
   Wire.begin();
   dht.begin();
+  EEPROM.begin(200);
 
   pinMode(SensorPower, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
@@ -77,10 +82,18 @@ void setup()
   readfromRTCMem(serverErrorCount, 1);
 
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), isr_rotation, FALLING);
-  delay(5000);
-
   // Serial.println(ESP.getResetReason());
   // Serial.println(serverErrorCount);
+
+  float memoryDirOffset = EEPROM_readFloat(dirOffsetMemAddress);
+  dirOffset = isnan(memoryDirOffset) ? 0 : memoryDirOffset;
+
+  for(int i = 0; i < 5; i++){
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
+  }
 }
 
 void loop()
@@ -129,6 +142,8 @@ void handleButtonPress(){
       offsetMode = true;
       break;
     }else if (pressTime > 500 && offsetMode == true){
+      EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
+      dirOffset = windDirAngleRaw;
       offsetMode = false;
       digitalWrite(LED_BUILTIN, HIGH);
       break;
@@ -245,8 +260,17 @@ void readVoltage(){
 
 void readWindDir(){
     if((lastReadDirAngle - millis()) >= 1500){
-      float angle = convertRawAngleToDegrees(ams5600.getRawAngle());\
-      windDirAngle = fmod(angle + dirOffset, 360.0);
+      windDirAngleRaw = convertRawAngleToDegrees(ams5600.getRawAngle());\
+      windDirAngle = fmod(windDirAngleRaw - dirOffset, 360.0);
+      if (windDirAngle < 0) {
+        windDirAngle += 360.0;
+      }
+      // Serial.print("angle - ");
+      // Serial.println(windDirAngleRaw);
+      // Serial.print("dirOffset - ");
+      // Serial.println(dirOffset);
+      Serial.print("windDirAngle - ");
+      Serial.println(windDirAngle);
     }
 
     lastReadDirAngle = millis();
@@ -345,4 +369,15 @@ void serialFlush(){
   while(Serial.available() > 0) {
     char t = Serial.read();
   }
+}
+
+void EEPROM_writeFloat(int address, float value) {
+  EEPROM.put(address, value);
+  EEPROM.commit();
+}
+
+float EEPROM_readFloat(int address) {
+  float value;
+  EEPROM.get(address, value);
+  return value;
 }
