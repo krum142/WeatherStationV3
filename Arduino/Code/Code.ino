@@ -57,44 +57,12 @@ unsigned long lastSendData = 0;
 const unsigned long sendDataInterval = 28000;
 uint32_t serverErrorCount = 0;
 
-volatile bool offsetMode = false;
+bool offsetMode = false;
 bool ledTrigger = false;
 
 void IRAM_ATTR isr_rotation();
 void enterSleep(short sleepMin, bool inSetup = false);
-
-volatile unsigned long pressStartTime = 0;
-// volatile bool buttonPressed = false;
-volatile unsigned long lastInterruptTime = 0; // For debounce
 // ----------------------------------
-
-void ICACHE_RAM_ATTR handleButtonPress() {
-    unsigned long currentTime = millis();
-
-    if (currentTime - lastInterruptTime > 100) {
-        lastInterruptTime = currentTime;
-
-      if (digitalRead(Button) == HIGH) { // Button pressed (assuming active low)
-          pressStartTime = millis();
-          // buttonPressed = true;
-      } else { // Button released
-          unsigned long pressDuration = millis() - pressStartTime;
-          pressStartTime = 0;
-          // buttonPressed = false;
-
-
-          if(pressDuration >= 5000 && offsetMode == false){ 
-            offsetMode = true;
-          }else if (pressDuration > 500 && offsetMode == true){
-            EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
-            dirOffset = windDirAngleRaw;
-            offsetMode = false;
-            digitalWrite(LED_BUILTIN, HIGH);
-          }
-      }
-    }
-}
-
 void setup()
 {
   Serial.begin(115200);
@@ -114,29 +82,17 @@ void setup()
   readfromRTCMem(serverErrorCount, 1);
 
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), isr_rotation, FALLING);
-  attachInterrupt(digitalPinToInterrupt(Button), handleButtonPress, CHANGE);
   // Serial.println(ESP.getResetReason());
   // Serial.println(serverErrorCount);
 
   float memoryDirOffset = EEPROM_readFloat(dirOffsetMemAddress);
   dirOffset = isnan(memoryDirOffset) ? 0 : memoryDirOffset;
 
-  for(int i = 0; i < 5; i++){
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-  }
+  ledBlink(5, 500);
 }
 
 void loop()
 {
-    // Serial.println(String(convertRawAngleToDegrees(ams5600.getRawAngle()),DEC));
-    
-    // Serial.println(windDirAngle);
-    // Serial.println(rotations);
-    // Serial.println(dhtTemp);
-    // Serial.println(dhtHum);
     delay(1000);
     if(offsetMode) {
       readWindDir();
@@ -162,36 +118,51 @@ void loop()
       windDirBuffCount++;
     }
     
-    // handleButtonPress();
+    handleButtonPress();
     
 }
 
-// void handleButtonPress(){
-//   unsigned long start = millis();
-//   unsigned long pressTime = 0;
-//   while(digitalRead(Button) == 1){
-//     pressTime = millis() - start;
-//     if(pressTime >= 5000 && offsetMode == false){ 
-//       offsetMode = true;
-//       break;
-//     }else if (pressTime > 500 && offsetMode == true){
-//       EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
-//       dirOffset = windDirAngleRaw;
-//       offsetMode = false;
-//       digitalWrite(LED_BUILTIN, HIGH);
-//       break;
-//     }
-//     yield();
-//   }
-//   Serial.println(offsetMode);
-//   Serial.println(pressTime);
-// }
+void handleButtonPress(){
+  unsigned long start = millis();
+  unsigned long pressTime = 0;
+
+  while(digitalRead(Button) == 1){
+    pressTime = millis() - start;
+    if(pressTime >= 5000 && offsetMode == false){ 
+      offsetMode = true;
+      ledBlink(10, 50);
+      delay(1000);
+      break;
+    }else if (pressTime > 500 && offsetMode == true){
+      EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
+      dirOffset = windDirAngleRaw;
+      offsetMode = false;
+      digitalWrite(LED_BUILTIN, HIGH);
+      ledBlink(10, 100);
+      break;
+    }
+    yield();
+  }
+  
+  Serial.println(offsetMode);
+  Serial.println(pressTime);
+}
 
 
 void ledBlink(){
   digitalWrite(LED_BUILTIN, ledTrigger);
   ledTrigger = !ledTrigger;
 }
+
+void ledBlink(int times, int ms){
+  for(int i = 0; i < times; i++){
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(ms);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(ms);
+  }
+}
+
 
 void sendHttp(){
   Serial.println(F("AT"));
@@ -293,21 +264,21 @@ void readVoltage(){
 }
 
 void readWindDir(){
-    if((lastReadDirAngle - millis()) >= 1500){
-      windDirAngleRaw = convertRawAngleToDegrees(ams5600.getRawAngle());\
-      windDirAngle = fmod(windDirAngleRaw - dirOffset, 360.0);
-      if (windDirAngle < 0) {
-        windDirAngle += 360.0;
-      }
-      // Serial.print("angle - ");
-      // Serial.println(windDirAngleRaw);
-      // Serial.print("dirOffset - ");
-      // Serial.println(dirOffset);
-      Serial.print("windDirAngle - ");
-      Serial.println(windDirAngle);
+  if((lastReadDirAngle - millis()) >= 1500){
+    windDirAngleRaw = convertRawAngleToDegrees(ams5600.getRawAngle());\
+    windDirAngle = fmod(windDirAngleRaw - dirOffset, 360.0);
+    if (windDirAngle < 0) {
+      windDirAngle += 360.0;
     }
+    // Serial.print("angle - ");
+    // Serial.println(windDirAngleRaw);
+    // Serial.print("dirOffset - ");
+    // Serial.println(dirOffset);
+    Serial.print("windDirAngle - ");
+    Serial.println(windDirAngle);
+  }
 
-    lastReadDirAngle = millis();
+  lastReadDirAngle = millis();
 }
 
 void readTempAndHumid() {
