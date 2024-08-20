@@ -46,7 +46,7 @@ unsigned long lastReadTempHumidity = 0;
 // ----------------------------------------
 
 // --------------- general ----------------
-#define SensorPower 14 // D6
+#define SensorPower 14 // D5
 #define Button 15 // D8
 
 AMS_5600 ams5600;
@@ -367,7 +367,7 @@ void enterSleep(short sleepMin, bool inSetup) { // isSetup = false
   }
 
   digitalWrite(SensorPower, LOW);
-  ESP.deepSleep((sleepMin * 6) *1e7);
+  ESP.deepSleep((sleepMin * 6) *1e7, WAKE_RF_DISABLED);
 }
 
 void serialFlush(){
