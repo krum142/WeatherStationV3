@@ -46,8 +46,8 @@ unsigned long lastReadTempHumidity = 0;
 // ----------------------------------------
 
 // --------------- general ----------------
-#define SensorPower D6
-#define Button 14
+#define SensorPower 14 // D6
+#define Button 15 // D8
 
 AMS_5600 ams5600;
 StaticJsonDocument<5000> dataToServer;
@@ -57,12 +57,44 @@ unsigned long lastSendData = 0;
 const unsigned long sendDataInterval = 28000;
 uint32_t serverErrorCount = 0;
 
-bool offsetMode = false;
+volatile bool offsetMode = false;
 bool ledTrigger = false;
 
 void IRAM_ATTR isr_rotation();
 void enterSleep(short sleepMin, bool inSetup = false);
+
+volatile unsigned long pressStartTime = 0;
+// volatile bool buttonPressed = false;
+volatile unsigned long lastInterruptTime = 0; // For debounce
 // ----------------------------------
+
+void ICACHE_RAM_ATTR handleButtonPress() {
+    unsigned long currentTime = millis();
+
+    if (currentTime - lastInterruptTime > 100) {
+        lastInterruptTime = currentTime;
+
+      if (digitalRead(Button) == HIGH) { // Button pressed (assuming active low)
+          pressStartTime = millis();
+          // buttonPressed = true;
+      } else { // Button released
+          unsigned long pressDuration = millis() - pressStartTime;
+          pressStartTime = 0;
+          // buttonPressed = false;
+
+
+          if(pressDuration >= 5000 && offsetMode == false){ 
+            offsetMode = true;
+          }else if (pressDuration > 500 && offsetMode == true){
+            EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
+            dirOffset = windDirAngleRaw;
+            offsetMode = false;
+            digitalWrite(LED_BUILTIN, HIGH);
+          }
+      }
+    }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -82,6 +114,7 @@ void setup()
   readfromRTCMem(serverErrorCount, 1);
 
   attachInterrupt(digitalPinToInterrupt(hallSensorPin), isr_rotation, FALLING);
+  attachInterrupt(digitalPinToInterrupt(Button), handleButtonPress, CHANGE);
   // Serial.println(ESP.getResetReason());
   // Serial.println(serverErrorCount);
 
@@ -129,30 +162,31 @@ void loop()
       windDirBuffCount++;
     }
     
-    handleButtonPress();
+    // handleButtonPress();
     
 }
 
-void handleButtonPress(){
-  unsigned long start = millis();
-  unsigned long pressTime = 0;
-  while(digitalRead(Button) == 1){
-    pressTime = millis() - start;
-    if(pressTime >= 5000 && offsetMode == false){ 
-      offsetMode = true;
-      break;
-    }else if (pressTime > 500 && offsetMode == true){
-      EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
-      dirOffset = windDirAngleRaw;
-      offsetMode = false;
-      digitalWrite(LED_BUILTIN, HIGH);
-      break;
-    }
-    yield();
-  }
-  Serial.println(offsetMode);
-  Serial.println(pressTime);
-}
+// void handleButtonPress(){
+//   unsigned long start = millis();
+//   unsigned long pressTime = 0;
+//   while(digitalRead(Button) == 1){
+//     pressTime = millis() - start;
+//     if(pressTime >= 5000 && offsetMode == false){ 
+//       offsetMode = true;
+//       break;
+//     }else if (pressTime > 500 && offsetMode == true){
+//       EEPROM_writeFloat(dirOffsetMemAddress, windDirAngleRaw);
+//       dirOffset = windDirAngleRaw;
+//       offsetMode = false;
+//       digitalWrite(LED_BUILTIN, HIGH);
+//       break;
+//     }
+//     yield();
+//   }
+//   Serial.println(offsetMode);
+//   Serial.println(pressTime);
+// }
+
 
 void ledBlink(){
   digitalWrite(LED_BUILTIN, ledTrigger);
