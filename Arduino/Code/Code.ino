@@ -3,7 +3,7 @@
 #include <DHT.h>
 #include <DHT_U.h>
 #include <EEPROM.h>
-#include <AS5600.h>
+#include "AS5600.h"
 #include <ArduinoJson.h>
 
 // ----------- voltage variables ----------
@@ -49,7 +49,7 @@ unsigned long lastReadTempHumidity = 0;
 #define SensorPower 14 // D5
 #define Button 15 // D8
 
-AMS_5600 ams5600;
+AS5600 as5600; 
 StaticJsonDocument<5000> dataToServer;
 StaticJsonDocument<500> dataFromServer;
 
@@ -70,6 +70,8 @@ void setup()
   dht.begin();
   EEPROM.begin(200);
 
+  as5600.begin();
+
   pinMode(SensorPower, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode (Button, INPUT);
@@ -87,7 +89,6 @@ void setup()
 
   float memoryDirOffset = EEPROM_readFloat(dirOffsetMemAddress);
   dirOffset = isnan(memoryDirOffset) ? 0 : memoryDirOffset;
-
   ledBlink(5, 500);
 }
 
@@ -265,7 +266,7 @@ void readVoltage(){
 
 void readWindDir(){
   if((lastReadDirAngle - millis()) >= 1500){
-    windDirAngleRaw = convertRawAngleToDegrees(ams5600.getRawAngle());\
+    windDirAngleRaw = convertRawAngleToDegrees(as5600.rawAngle());
     windDirAngle = fmod(windDirAngleRaw - dirOffset, 360.0);
     if (windDirAngle < 0) {
       windDirAngle += 360.0;
