@@ -11,8 +11,8 @@
 
 float voltage = 0;
 
-const float R1 = 10000.0;    // Resistance value of R1 in ohms
-const float R2 = 45000.0;    // Resistance value of R2 in ohms
+const float R1 = 27000.0;    // Resistance value of R1 in ohms
+const float R2 = 47000.0;    // Resistance value of R2 in ohms
 // ----------------------------------------
 
 // ------ wind dir sensing variables ------
@@ -90,6 +90,7 @@ void setup()
   float memoryDirOffset = EEPROM_readFloat(dirOffsetMemAddress);
   dirOffset = isnan(memoryDirOffset) ? 0 : memoryDirOffset;
   ledBlink(5, 500);
+  Serial.println("Alive");
 }
 
 void loop()
@@ -286,15 +287,15 @@ void readTempAndHumid() {
   if((lastReadTempHumidity - millis()) >= 1500){
     // dhtTemp = dht.readTemperature();
     // dhtHum = dht.readHumidity();
+    float hum, temp;
     sensors_event_t event;
     dht.humidity().getEvent(&event);
-    dhtHum = event.relative_humidity;
+    hum = event.relative_humidity;
     dht.temperature().getEvent(&event);
-    dhtTemp = event.temperature;
+    temp = event.temperature;
+    dhtHum = isnan(hum) ? 0 : hum;
+    dhtTemp = isnan(temp) ? 0 : temp; 
   }
-
-  // doc["t2"] = isnan(dhtTemp) ? 0 : dhtTemp;
-  // doc["h"] = isnan(dhtHum) ? 0 : dhtHum;
 
   lastReadTempHumidity = millis();
 }
